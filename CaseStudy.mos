@@ -1,0 +1,223 @@
+model "The 3-Echelon Multi-period Warehouse Location Problem"
+uses  "mmsystem", "mmjobs", "mminsight"
+
+!forward function computeTotalCost(Y: array(range) of integer) : real
+
+! ============================================================================
+! Reading problem parameters
+! ============================================================================
+filename := "CaseStudyData.txt"; 
+!filename := "CaseStudyDataAggregated.txt"
+
+declarations
+  ! Number of postcode districts
+  nbCustomers: integer
+  ! Number of potantial locations
+  nbLocations: integer
+  ! Number of suppliers
+  nbSuppliers: integer
+  ! Number of product groups
+  nbProductGroups: integer
+  ! Number of vehicle types
+  nbVehicleTypes: integer
+  ! Number of periods
+  nbPeriods: integer
+end-declarations
+
+! Read the various numbers from the file
+initializations from filename
+  nbCustomers nbSuppliers nbProductGroups nbVehicleTypes
+end-initializations
+
+! All districts are potential locations
+nbLocations := nbCustomers
+
+! 10 periods
+nbPeriods := 10
+
+declarations
+  ! Set of potential locations
+  Locations = 1..nbLocations
+  ! Set of customers
+  Customers = 1..nbCustomers
+  ! Set of suppliers
+  Suppliers = 1..nbSuppliers
+  ! Set of product groups
+  Products = 1..nbProductGroups
+  ! Set of vehicle types
+  Vehicles = 1..nbVehicleTypes
+  ! Set of periods
+  Periods = 1..nbPeriods
+  
+  
+  !My Initializations
+  SupplierCapacity_perProduct: array(Products) of real
+  s: array(Suppliers, Locations, Products, Periods) of mpvar
+  w: array(Locations, Locations, Products, Periods) of mpvar
+  w_check: array(Locations, Periods) of integer
+  !returns 0 if that location does not have a warehouse
+  check: array(Locations) of integer
+  
+  
+  Demand: array(Customers, Products, Periods) of real
+  ! Total demand per product group
+  total_demand: array(Products) of real
+  
+  ! Vector of supplier product groups; recall that each supplier only provides one product group
+  SupplierProductGroup: array(Suppliers) of integer
+  ! Vector of supplier capacity given in kilograms per year
+  SupplierCapacity: array(Suppliers) of real
+  ! Vector of supplier vehicle types
+  SupplierVehicleType: array(Suppliers) of integer
+  
+  ! Setup costs for warehouses and cross-docks
+  SetupWarehouses: array(Locations) of integer
+  OperatingWarehouses: array(Locations) of integer
+  
+  ! Distance matrix between customers and locations in miles 
+  Distance: array(Customers,Locations) of real
+  ! Distance matrix between locations and suppliers in miles
+  DistanceSupplier: array(Locations,Suppliers) of real
+  ! Matrix of transportation costs between customers and locations
+  Cost: array(Customers,Locations) of real
+  ! Matrix of transportation costs between locations and suppliers
+  CostSupplier: array(Locations,Suppliers) of real
+
+  ! Vehicle related data. The vehicles are indexed 1, 2, and 3, where 1 stands 
+  ! for 18t trucks, 2 for 7.5t lorries, and 3 for 3.5t vans.
+  ! The vehicle capacity in tonnes
+  VehicleCapacity: array(Vehicles) of real
+  ! The overall cost in pounds per mile travelled
+  VehicleCostPerMileOverall: array(Vehicles) of real
+  ! The overall cost in pounds per mile and tonne transported
+  VehicleCostPerMileAndTonneOverall: array(Vehicles) of real
+  ! The CO2 emission in kilograms per mile and tonne transported
+  VehicleCO2PerMileAndTonne: array(Vehicles) of real
+
+  ! The time period when a facility was constructed, nbPeriods + 1 if never built
+  Y: array(Locations) of integer
+  
+  ! The vector of customer allocations
+  X: array(Customers,Periods) of integer
+  ! The vector of supplier allocations
+  Z: array(Locations,Products) of integer
+  ! A set for the omega rule
+  Omega, OmegaRule: set of integer
+  
+end-declarations
+
+
+! Read data
+initializations from filename
+  SetupWarehouses OperatingWarehouses
+  SupplierProductGroup SupplierCapacity SupplierVehicleType
+  VehicleCapacity VehicleCostPerMileOverall VehicleCostPerMileAndTonneOverall
+  VehicleCO2PerMileAndTonne
+  Demand as "CustomerDemand"
+  Distance as "DistanceLocationCustomer"
+  DistanceSupplier as "DistanceLocationSupplier"
+end-initializations
+
+!Y INITIALIZE -  to 11 if if a warehouse is never built at that location else 1 to 10
+forall(l in Locations) do
+  Y(l):=11
+end-do
+
+!according to given data
+Y(10) := 1
+Y(30) := 3
+Y(50) := 5
+
+
+forall(p in Products, k in Suppliers) do
+  if (SupplierProductGroup(k) = p) then
+   SupplierCapacity_perProduct (p) := SupplierCapacity_perProduct (p)+SupplierCapacity(k)
+  end-if
+end-do
+
+forall(p in Products, t in Periods) do
+  sum(k in Suppliers, j in Locations) s(k,j,p,t) <= SupplierCapacity_perProduct(p)
+end-do
+
+
+forall(t in Periods, p in Products) do
+  sum(j,i in Locations) w(j,i,p,t) <= sum(k in Suppliers, j in Locations) s(k,j,p,t)
+end-do
+
+
+forall(j in Locations, t in Periods) do
+  w_check(j,t) := 0
+end-do
+
+forall(j in Locations, t in Periods) do
+  if (Y(j) = t) then
+   forall(t1 in t..nbPeriods) do
+     w_check(j,t1) := 1
+   end-do
+  end-if
+end-do
+
+
+forall(i in Locations, p in Products, t in Periods) do
+  sum(j in Locations) w(j,i,p,t) * w_check(j,t) >= Demand(i,p,t)
+end-do
+
+
+
+
+
+
+! Transports between suppliers and locations use either 7.5t or 18t trucks, depending on the 
+! vehicle type. Make sure to convert from tonne to kilogram.
+! --------------------------------------------------------------------------------------------------
+
+forall(j in Locations, k in Suppliers) do
+  if(SupplierVehicleType(k) = 1) then
+    CostSupplier(j,k) := DistanceSupplier(j,k) * VehicleCostPerMileAndTonneOverall(1) / 1000
+  else
+    CostSupplier(j,k) := DistanceSupplier(j,k) * VehicleCostPerMileAndTonneOverall(2) / 1000
+  end-if
+end-do
+
+! Transports between locations and customers use 3.5t vans.
+! Make sure to convert from tonne to kilogram.
+! --------------------------------------------------------------------------------------------------
+forall(i,j in Locations) do
+  Cost(i,j) := Distance(i,j) * VehicleCostPerMileAndTonneOverall(3) / 1000
+end-do  
+
+
+
+
+  
+forall(j in Locations) do
+ if  (Y(j) = 11) then 
+  check(j) := 0
+ else 
+  check(j):= 1
+ end-if
+end-do
+
+setup := sum(j in Locations) (check(j) * SetupWarehouses(j))
+
+operating := sum(j in Locations) ((11 - Y(j)) * OperatingWarehouses(j))
+
+transport := (sum(i,j in Locations) Cost(i,j)) * 
+             (sum(j in Locations, i in Locations, p in Products, t in Periods) w(j,i,p,t)) +
+             (sum(j in Locations, k in Suppliers) Cost(j,k)) *
+             (sum(k in Suppliers, j in Locations, p in Products, t in Periods) s(k,j,p,t))
+             
+Totalcost:= transport+setup+operating
+
+minimize(Totalcost)
+
+
+! ==================================================================================================
+! Compute the total transportation cost for a given set of facilities
+! ==================================================================================================
+!function computeTotalCost(Y: array(range) of integer) : real
+
+!end-function
+
+
+end-model
