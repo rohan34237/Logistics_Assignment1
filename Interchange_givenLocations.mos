@@ -1,0 +1,252 @@
+model interchange
+  uses "mmsystem", "mmjobs","mmxprs"
+  
+! Forwarding the functions
+forward function calculateTotalCost(Y: set of integer) : real
+forward function sortIntegerSet(Y: set of integer) : set of integer
+forward procedure printSolution(Y: set of integer)
+
+  declarations
+  nbCustomers: integer
+  nbLocations: integer
+  nbSuppliers: integer
+  nbProductGroups: integer
+  nbVehicleTypes: integer
+  nbPeriods: integer
+  end-declarations
+
+filename := "CaseStudyData.txt";
+! filename := "CaseStudyDataAggregated.txt"
+
+initializations from filename
+  nbCustomers nbSuppliers nbProductGroups nbVehicleTypes
+end-initializations
+
+nbLocations := nbCustomers
+
+nbPeriods := 10
+
+declarations
+  Locations = 1..nbLocations
+  Customers = 1..nbCustomers
+  Suppliers = 1..nbSuppliers
+  Products = 1..nbProductGroups
+  Vehicles = 1..nbVehicleTypes
+  Periods = 1..nbPeriods
+
+  CustomerId: array(Customers) of string
+  CustomerEasting: array(Customers) of real
+  CustomerNorthing: array(Customers) of real
+  Demand: array(Customers, Products, Periods) of real
+  total_demand: array(Products) of real
+
+  SupplierId: array(Suppliers) of integer
+  SupplierEasting: array(Customers) of real
+  SupplierNorthing: array(Customers) of real
+  SupplierProductGroup: array(Suppliers) of integer
+  SupplierCapacity: array(Suppliers) of real
+  SupplierVehicleType: array(Suppliers) of integer
+
+  SetupWarehouses: array(Locations) of integer
+  OperatingWarehouses: array(Locations) of integer
+
+  Distance: array(Customers,Locations) of real
+  DistanceSupplier: array(Locations,Suppliers) of real
+  Cost: array(Customers,Locations) of real
+  CostSupplier: array(Locations,Suppliers) of real
+
+  VehicleCapacity: array(Vehicles) of real
+  VehicleCostPerMileOverall: array(Vehicles) of real
+  VehicleCostPerMileAndTonneOverall: array(Vehicles) of real
+  VehicleCO2PerMileAndTonne: array(Vehicles) of real
+
+end-declarations
+
+
+declarations
+  !Y: array(Locations) of integer
+  op: array(Locations) of integer ! if warehouse j is built
+  !X: array(Customers,Products,Periods) of integer
+  !Z: array(Suppliers,Locations,Products) of integer
+  Omega, OmegaRule: set of integer
+  INDICES, I: set of integer
+
+  x: array(Locations,Customers,Products,Periods) of mpvar !products quantity from warehouses to customers
+  z: array(Suppliers,Locations,Products,Periods) of mpvar !products quantity from suppliers to warehouses
+  y: array(Locations) of mpvar ! when we build warehouse in these locations
+
+end-declarations
+
+initializations from filename
+  CustomerId CustomerEasting CustomerNorthing
+  SetupWarehouses OperatingWarehouses
+  SupplierId SupplierProductGroup SupplierCapacity SupplierVehicleType
+  SupplierEasting SupplierNorthing
+  VehicleCapacity VehicleCostPerMileOverall VehicleCostPerMileAndTonneOverall
+  VehicleCO2PerMileAndTonne
+  Demand as "CustomerDemand"
+  Distance as "DistanceLocationCustomer"
+  DistanceSupplier as "DistanceLocationSupplier"
+end-initializations
+
+
+! initialize y(l) with value 11 for locations which are never built 
+forall(l in Locations) do
+  Y(l):= 11
+end-do
+
+!according to given data
+Y(10) := 1 ! in year 1, we build warehouse at location 10
+Y(30) := 3 ! in year 3, we build warehouse at location 30
+Y(50) := 5! in year 5, we build warehouse at location 50
+Y(70) := 7! in year 7, we build warehouse at location 70
+Y(90) := 9! ! in year 9, we build warehouse at location 90
+
+INDICES:= {10, 30, 50, 70, 90}
+
+forall(j in INDICES) I += {j}
+
+! Sorting for tracibility
+I := sortIntegerSet(I)
+
+! Save the cost of the starting solution
+best_cost := calculateTotalCost(I);
+
+write("Starting solution:");
+printSolution(I); writeln; writeln
+
+
+! ==================================================================================================
+! Iterations
+! ==================================================================================================
+improvement_found := true
+iter := 1
+  
+! Iterate as long as we can improve the solution
+while(improvement_found) do
+
+  ! Print iteration counter
+  writeln("Iteration ", iter); iter += 1
+  writeln("----------------------------------------------")
+
+  ! Set the control parameter to false
+  improvement_found := false
+
+  ! ------------------------------------------------------------------------------------------------
+  ! Explore the exchange neigborhood
+  ! ------------------------------------------------------------------------------------------------
+
+  ! Go over all locations in the solution
+  forall(j in I) do
+
+    ! Go over all locations not in the solution
+    forall(l in Locations - I) do
+        
+      ! Derive the neighboring solution ...
+      Yp := I - {j} + {l}
+      ! ... and compute its cost
+      cost := calculateTotalCost(Yp)
+      !writeln("- ", j, ", ", l, ": ", cost)
+        
+      ! Is this neighboring solution better? 
+      ! If yes, then replace the previous solution and start from the beginning
+      if(cost < best_cost) then
+        ! Save cost and set flag
+        best_cost := cost
+        improvement_found := true
+
+        ! Make sure that the new set of selected locations is sorted, and then save it
+        Yp := sortIntegerSet(Yp)
+        I := Yp; 
+  
+        writeln("Improved exchange solution found: "); write("  ")
+        forall(r in Yp) write(r, " ")
+        writeln; writeln("with cost: ", best_cost)
+        
+        break 2
+      end-if
+    end-do
+  end-do
+  
+  if(not improvement_found) then
+    writeln("No improving pair found ==> STOP")
+  end-if
+
+  writeln
+end-do
+
+  
+! ==================================================================================================
+! Output
+! ==================================================================================================
+
+! Print the best solution
+printSolution(I)
+
+
+! --------------------------------------------------------------------------------------------------
+! Save the set of selected locations in the data set under the name 'SelectedLocationsInterchange'. 
+! --------------------------------------------------------------------------------------------------
+initializations to filename
+  I as 'SelectedLocationsInterchange'
+end-initializations
+
+
+! ==================================================================================================
+! Function to calculate the total costs of a solution I
+! ==================================================================================================
+function calculateTotalCost(I: set of integer) : real
+
+  ! Compute the setup costs
+  returned := sum(j in I) (SetupWarehouses(j) + OperatingWarehouses(j))
+  
+  ! Compute the service costs for customers
+  transport := sum(j in I, i in Locations) Cost(i,j) + sum(j in I, s in Suppliers) CostSupplier(j,s)
+  
+  returned += sum(i in Locations, s in Suppliers) min(j in I) (Cost(i,j) + CostSupplier(j,s))
+  
+end-function
+
+
+
+! ==================================================================================================
+! Function to Print a solution
+! ==================================================================================================
+procedure printSolution(I: set of integer)
+  declarations
+    x: array(Customers) of integer
+  end-declarations
+  
+  writeln; writeln('---------------------------------------------------------')
+  write("Selected Locations: ")
+  forall(j in I)
+    write(j, " ")
+  writeln; writeln
+
+  writeln("Setup cost + Operating cost + Transportation cost per unit quantity : ", sum(j in I) (SetupWarehouses(j) + OperatingWarehouses(j)) + sum(i in Locations, s in Suppliers) min(j in I) (Cost(i,j) + CostSupplier(j,s)))
+  writeln('---------------------------------------------------------')
+end-procedure
+
+function sortIntegerSet(I: set of integer) : set of integer
+  ! Start by finding the largest value in the set
+  max_int := max(j in I) j
+  
+  ! Create a binary vector to indicate whether an integer is in the set or not
+  declarations
+  	set_vector: array(1..max_int) of integer
+  	Yp: set of integer
+  end-declarations
+  
+  ! Set the vector entry to 1 for all integers in the set
+  forall(j in I)
+    set_vector(j) := 1
+    
+  ! Go through the vector and add all elements with a value of 1 to the new set
+  forall(i in 1..max_int | set_vector(i) = 1)
+    Yp += {i}
+    
+  ! Return the new set
+  returned := Yp
+end-function
+
+end-model
