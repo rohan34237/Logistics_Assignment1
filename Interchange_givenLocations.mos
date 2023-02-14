@@ -102,12 +102,82 @@ Y(50) := 5! in year 5, we build warehouse at location 50
 Y(70) := 7! in year 7, we build warehouse at location 70
 Y(90) := 9! ! in year 9, we build warehouse at location 90
 
+!UPDATE THESE INDICES TO TEST THE CODE ON DIFFERENT SET OF WAREHOUSE LOCATIONS
 INDICES:= {10, 30, 50, 70, 90}
 
 forall(j in INDICES) I += {j}
 
 ! Sorting for tracibility
 I := sortIntegerSet(I)
+
+
+! x>=0 from Y(j), for example, warehouse at location 30 can only provide products to customers from year 3,it's not operatinf before year 3
+forall(j in I, t in Periods ) do
+if(Y(j)=0) then
+  forall(p in Products,i in Customers) x(j,i,p,t) = 0
+
+  elif (t<Y(j)) then
+
+    forall(p in Products,i in Customers) x(j,i,p,t) = 0
+  end-if
+end-do
+
+! z>=0 from Y(j), for example, suppliers can only provide products to warehouse at location 30 from year 3,it's not operatinf before year 3
+forall(j in I, t in Periods ) do
+if(Y(j)=0) then
+  forall(p in Products,s in Suppliers) z(s,j,p,t) = 0
+
+  elif (t<Y(j)) then
+
+    forall(p in Products,s in Suppliers) z(s,j,p,t) = 0
+  end-if
+end-do
+
+
+! f(j)>0, warehouse j is built, op(j)=1
+forall(j in I) do
+  if(Y(j)>0) then
+    op(j):=1
+  else
+  op(j):=0
+  end-if
+end-do
+
+
+! Transports cost between suppliers and locations
+forall(j in Locations, s in Suppliers) do
+  if(SupplierVehicleType(s) = 1) then
+    CostSupplier(j,s) := DistanceSupplier(j,s) * VehicleCostPerMileAndTonneOverall(1) / 1000
+  else
+    CostSupplier(j,s) := DistanceSupplier(j,s) * VehicleCostPerMileAndTonneOverall(2) / 1000
+  end-if
+end-do
+
+!Transports cost between locations and customers
+forall(i,j in Locations)
+  Cost(i,j) := Distance(i,j) * VehicleCostPerMileAndTonneOverall(3) / 1000
+
+
+! products quantity from warehouses to customers x >= demand
+forall(i in Customers, t in Periods,p in Products) do
+  sum(j in Locations) x(j,i,p,t) >= Demand(i,p,t)
+end-do
+
+!products quantity from suppliers to warehouses z >= products quantity from warehouses to customers x
+forall(j in Locations,t in Periods,p in Products) do
+  sum(s in Suppliers) z(s,j,p,t) >= sum(i in Customers) x(j,i,p,t)
+end-do
+
+! one supplier can only provide one products
+forall(s in Suppliers,p in Products, j in Locations,t in Periods) do
+  if(SupplierProductGroup(s)=p) then
+    z(s,j,p,t)>=0
+  else
+    z(s,j,p,t)=0
+  end-if
+end-do
+
+
 
 ! Save the cost of the starting solution
 best_cost := calculateTotalCost(I);
@@ -198,7 +268,7 @@ end-initializations
 function calculateTotalCost(I: set of integer) : real
 
   ! Compute the setup costs
-  returned := sum(j in I) (SetupWarehouses(j) + OperatingWarehouses(j))
+  returned := sum(j in I) (SetupWarehouses(j) + (11-Y(j))*OperatingWarehouses(j))
   
   ! Compute the service costs for customers
   transport := sum(j in I, i in Locations) Cost(i,j) + sum(j in I, s in Suppliers) CostSupplier(j,s)
@@ -223,7 +293,7 @@ procedure printSolution(I: set of integer)
     write(j, " ")
   writeln; writeln
 
-  writeln("Setup cost + Operating cost + Transportation cost per unit quantity : ", sum(j in I) (SetupWarehouses(j) + OperatingWarehouses(j)) + sum(i in Locations, s in Suppliers) min(j in I) (Cost(i,j) + CostSupplier(j,s)))
+  writeln("Setup cost + Operating cost + Transportation cost per unit quantity : ", sum(j in I) (SetupWarehouses(j) + (11-Y(j))*OperatingWarehouses(j)) + sum(i in Locations, s in Suppliers) min(j in I) (Cost(i,j) + CostSupplier(j,s)))
   writeln('---------------------------------------------------------')
 end-procedure
 

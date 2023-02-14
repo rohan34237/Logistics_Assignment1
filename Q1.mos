@@ -87,7 +87,6 @@ initializations from filename
   DistanceSupplier as "DistanceLocationSupplier"
 end-initializations
 
-
 ! initialize y(l)
 forall(l in Locations) do
   Y(l):= 0
@@ -192,9 +191,9 @@ procedure computeTotalCost(I: set of integer)
 
 end-procedure
 
+
 ! set of indices
 I:={10, 30, 50}
-
 !running procedure computeTotalCost
 computeTotalCost(I)
 
