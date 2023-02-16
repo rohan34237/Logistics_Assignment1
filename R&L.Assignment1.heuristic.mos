@@ -87,72 +87,34 @@ end-initializations
 
 
 
-! forall(l in Locations) do
-!   Y(l):= 0
-! end-do
-
-
-
-! !according to given data
-! Y(10) := 1 ! in year 1, we build warehouse at location 10
-! Y(30) := 3 ! in year 3, we build warehouse at location 30
-! Y(50) := 5! in year 5, we build warehouse at location 50
-
 
 ! Initialise the cost of the best solution with +Infinity
 cost_min := MAX_REAL
 
 
 
-forall(iter in 1..5) do
+forall(iter in 1..500) do
 
 
-
-  ! Set the location set to the empty set
-  ! forall(j in Locations) do
-  !   Y(j):= 0
-  ! end-do
-
-  ! Go over all locations and randomly draw a number in (0,1)
+  ! Go over all locations and randomly draw a number in (0,1) 
   ! if the number is >= 0.9, add the location to Y
+  !then randomly allocate a year
+  
   forall(j in Locations) do
     u := random
     Y(j):= 0
-    if(u >= 0.1) then  ! random decision if a warehouse should be built at location j
+    if(u >= 0.9) then  ! random decision if a warehouse should be built at location j
       int := integer(round((10*random)+0.5))  ! random decision on what time the warehouse is built ie year [1,10]
       Y(j) := int
+    
       
     end-if
+    !Ensuring at least 1 warehouse is built in period 1
+    feasible := integer(round((nbLocations*random)+0.5))
+    Y(feasible):= 1 
   end-do
   
-  ! x>=0 from Y(j), for example, warehouse at location 30 can only provide products to customers from year 3,it's not operatinf before year 3
-  forall(j in Locations, t in Periods ) do
-  if(Y(j)=0) then
-    forall(p in Products,i in Customers) x(j,i,p,t) = 0
-
-    elif (t<Y(j)) then
-
-      forall(p in Products,i in Customers) x(j,i,p,t) = 0
-    
-   
-    end-if
-  end-do
-
-  ! z>=0 from Y(j), for example, suppliers can only provide products to warehouse at location 30 from year 3,it's not operatinf before year 3
-  forall(j in Locations, t in Periods ) do
-  if(Y(j)=0) then
-    forall(p in Products,s in Suppliers) z(s,j,p,t) = 0
-
-    elif (t<Y(j)) then
-
-      forall(p in Products,s in Suppliers) z(s,j,p,t) = 0
-    
-
-    end-if
-  end-do
-
-
-  ! f(j)>0, warehouse j is built, op(j)=1
+   ! f(j)>0, warehouse j is built, op(j)=1
   forall(j in Locations) do
     if(Y(j)>0) then
       op(j):=1
@@ -175,32 +137,10 @@ forall(iter in 1..5) do
   forall(i,j in Locations)
     Cost(i,j) := Distance(i,j) * VehicleCostPerMileAndTonneOverall(3) / 1000
 
-
-  ! products quantity from warehouses to customers x >= demand
-  forall(i in Customers, t in Periods,p in Products) do
-    sum(j in Locations) x(j,i,p,t) >= Demand(i,p,t)
-  end-do
-
-  !products quantity from suppliers to warehouses z >= products quantity from warehouses to customers x
-  forall(j in Locations,t in Periods,p in Products) do
-    sum(s in Suppliers) z(s,j,p,t) >= sum(i in Customers) x(j,i,p,t)
-  end-do
-
-  ! one supplier can only provide one products
-  forall(s in Suppliers,p in Products, j in Locations,t in Periods) do
-    if(SupplierProductGroup(s)=p) then
-      z(s,j,p,t)>=0
-    else
-      z(s,j,p,t)=0
-    end-if
-  end-do
-
-
   cost := calculateTotalCost(Y);
     
-    
-    writeln(cost)
-    writeln(cost_min)
+  
+
   if cost < cost_min then
 
     cost_min := cost
@@ -216,24 +156,42 @@ function calculateTotalCost(Y: array(Locations) of integer) : real
 
 setup := sum(j in Locations) op(j)*SetupWarehouses(j)
 
+! Comparing all suppliers to find the cheapest for each warehouse, product and time period
+forall(j in Locations, p in Products) do
+  Cheapest_Supply := min(s in Suppliers | SupplierProductGroup(s) = p) CostSupplier(j,s)
+  forall(s in Suppliers | CostSupplier(j,s) = Cheapest_Supply) Z(j,p) := s
+end-do
+
+! Comparing all warehouses to find the cheapest for each customer, product and time period
+forall(i in Customers, p in Products, t in Periods) do
+    Cheapest_Warehouse := min(j in Locations | Y(j) > 0 and Y(j) <= t) (CostSupplier(j,Z(j,p)) + Cost(i,j))
+    forall(j in Locations | CostSupplier(j,Z(j,p)) + Cost(i,j) = Cheapest_Warehouse) X(i,p,t) := j
+end-do
+
+!finding total transport cost
+Transport_Supply := sum(j in Locations, p in Products, t in Periods) ( (sum(i in Customers | X(i,p,t) = j) Demand(i,p,t)) * CostSupplier(j, Z(j,p)) )
+Transport_Warehouse := sum(i in Customers, p in Products, t in Periods) ( Demand(i,p,t) * Cost(i,X(i,p,t)) )
+
+!combine
+transport := Transport_Supply + Transport_Warehouse
+
+
  ! operating cost
 operatingcost := sum(j in Locations) op(j)*(11 - Y(j))* OperatingWarehouses(j)
 
- ! transport cost
- transport := sum(j in Locations, i in Customers, p in Products, t in Periods) Cost(i,j)*x(j,i,p,t) + sum(s in Suppliers, j in Locations, p in Products, t in Periods) CostSupplier(j,s)*z(s,j,p,t)
-
- ! objective functiun
+  ! objective functiun
  obj := operatingcost+transport+setup
 
-  minimize(obj)
-
-    !writeln("The minimum cost is £",getobjval,".")
-    !...
-    !writeln("End running model")
-  returned := getobjval
+  returned := obj
 
 end-function
 
+initializations to filename
+  Y_min as 'Locations'
+end-initializations
+
+
+forall(k in Locations | Y_min(k) > 0) writeln("Build ",k," in period ",Y_min(k))
 
 
 end-model
