@@ -10,8 +10,8 @@ model ModelName
   nbPeriods: integer
   end-declarations
 
-!filename := "CaseStudyData.txt";
-filename := "CaseStudyDataAggregated.txt"
+filename := "CaseStudyData.txt";
+!filename := "CaseStudyDataAggregated.txt"
 
 initializations from filename
   nbCustomers nbSuppliers nbProductGroups nbVehicleTypes
@@ -91,9 +91,9 @@ end-initializations
 ! Initialise the cost of the best solution with +Infinity
 cost_min := MAX_REAL
 
-
-
-forall(iter in 1..500) do
+!intilialise start time
+starttime := gettime
+forall(iter in 1..1) do
 
 
   ! Go over all locations and randomly draw a number in (0,1) 
@@ -103,16 +103,14 @@ forall(iter in 1..500) do
   forall(j in Locations) do
     u := random
     Y(j):= 0
-    if(u >= 0.9) then  ! random decision if a warehouse should be built at location j
+    if(u >= 0.95) then  ! random decision if a warehouse should be built at location j
       int := integer(round((10*random)+0.5))  ! random decision on what time the warehouse is built ie year [1,10]
       Y(j) := int
-    
-      
     end-if
     !Ensuring at least 1 warehouse is built in period 1
-    feasible := integer(round((nbLocations*random)+0.5))
-    Y(feasible):= 1 
   end-do
+  feasible := integer(round((nbLocations*random)+0.5))
+  Y(feasible):= 1 
   
    ! f(j)>0, warehouse j is built, op(j)=1
   forall(j in Locations) do
@@ -187,11 +185,16 @@ operatingcost := sum(j in Locations) op(j)*(11 - Y(j))* OperatingWarehouses(j)
 end-function
 
 initializations to filename
-  Y_min as 'Locations'
+  Y_min as 'WarehouseLocations'
 end-initializations
 
-
+!get how long it took to run 
+!time := gettime-starttime
 forall(k in Locations | Y_min(k) > 0) writeln("Build ",k," in period ",Y_min(k))
+
+writeln("For an overall cost of £", cost_min)
+
+writeln("In ", gettime-starttime, " seconds.")
 
 
 end-model
